@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getDocuments, createDocument, deleteDocument } from '../api/documentService';
+import TemplateGallery from './TemplateGallery';
 
 const getInitialUsername = () => {
     let name = sessionStorage.getItem('collab-username');
@@ -11,10 +12,13 @@ const getInitialUsername = () => {
 };
 
 const DocumentList = ({ onSelectDocument }) => {
-  const [documents, setDocuments] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [username, setUsername] = useState(getInitialUsername());
+  const [documents, setDocuments]     = useState([]);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState(null);
+  const [username, setUsername]       = useState(getInitialUsername());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showGallery, setShowGallery] = useState(false);
+  const [creating, setCreating]       = useState(false);
 
   useEffect(() => {
     fetchDocuments();
@@ -37,47 +41,55 @@ const DocumentList = ({ onSelectDocument }) => {
   const handleUsernameChange = (val) => {
     setUsername(val);
     sessionStorage.setItem('collab-username', val);
-    // Tải lại danh sách tài liệu sau khi thay đổi username để áp dụng quyền truy cập mới
     fetchDocuments();
   };
 
-  const handleNewDocument = () => {
-    createDocument({ title: 'Untitled document' })
+  // Tạo tài liệu từ template đã chọn
+  const handleTemplateSelect = (template) => {
+    setShowGallery(false);
+    setCreating(true);
+    const title = template.id === 'blank' ? 'Tài liệu không có tiêu đề' : template.name;
+    createDocument({ title, content: template.content })
       .then(newDoc => {
+        setCreating(false);
         fetchDocuments();
         onSelectDocument(newDoc._id);
       })
       .catch(err => {
+        setCreating(false);
         setError(err.message);
       });
   };
 
   const handleDelete = (id) => {
     if (!window.confirm('Bạn có chắc chắn muốn xóa tài liệu này?')) return;
-
     deleteDocument(id)
-      .then(() => {
-        fetchDocuments();
-      })
-      .catch(err => {
-        setError(err.message);
-      });
+      .then(() => fetchDocuments())
+      .catch(err => setError(err.message));
   };
 
   const getAccessBadge = (access, isOwner) => {
-      if (isOwner) return <span className="access-badge badge-owner">👑 Chủ sở hữu</span>;
-      if (access === 'none') return <span className="access-badge badge-private">🔒 Riêng tư</span>;
-      if (access === 'view') return <span className="access-badge badge-view">👁️ Chỉ xem</span>;
-      return <span className="access-badge badge-edit">✍️ Chỉnh sửa</span>;
+    if (isOwner) return <span className="access-badge badge-owner">👑 Chủ sở hữu</span>;
+    if (access === 'none') return <span className="access-badge badge-private">🔒 Riêng tư</span>;
+    if (access === 'view') return <span className="access-badge badge-view">👁️ Chỉ xem</span>;
+    return <span className="access-badge badge-edit">✍️ Chỉnh sửa</span>;
   };
+
+  // Filter theo search query
+  const filteredDocs = useMemo(() => {
+    if (!searchQuery.trim()) return documents;
+    const q = searchQuery.trim().toLowerCase();
+    return documents.filter(d => d.title.toLowerCase().includes(q));
+  }, [documents, searchQuery]);
 
   return (
     <div className="document-list-container">
+      {/* Header */}
       <div className="list-top-bar">
         <div className="user-profile-section">
           <span className="profile-icon">👤</span>
           <div className="profile-details">
-            <label>Tên của bạn (Username):</label>
+            <label>Tên của bạn:</label>
             <input
               type="text"
               value={username}
@@ -87,9 +99,28 @@ const DocumentList = ({ onSelectDocument }) => {
             />
           </div>
         </div>
-        <button className="btn btn-create" onClick={handleNewDocument}>
-          ➕ Tạo tài liệu mới
+        <button
+          className="btn btn-create"
+          onClick={() => setShowGallery(true)}
+          disabled={creating}
+        >
+          {creating ? '⏳ Đang tạo...' : '➕ Tạo tài liệu mới'}
         </button>
+      </div>
+
+      {/* Search bar */}
+      <div className="list-search-bar">
+        <span className="search-icon">🔍</span>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Tìm kiếm tài liệu..."
+          className="list-search-input"
+        />
+        {searchQuery && (
+          <button className="search-clear" onClick={() => setSearchQuery('')} title="Xóa tìm kiếm">✕</button>
+        )}
       </div>
 
       {error && <div className="error-bar">⚠️ {error}</div>}
@@ -97,17 +128,23 @@ const DocumentList = ({ onSelectDocument }) => {
       <div className="documents-grid">
         {loading ? (
           <div className="list-loading">Đang tải danh sách tài liệu...</div>
-        ) : documents.length === 0 ? (
+        ) : filteredDocs.length === 0 && documents.length > 0 ? (
+          <div className="empty-state">
+            <span className="empty-icon">🔍</span>
+            <p>Không tìm thấy tài liệu nào khớp với "<strong>{searchQuery}</strong>".</p>
+            <button className="btn btn-primary" onClick={() => setSearchQuery('')}>Xóa bộ lọc</button>
+          </div>
+        ) : filteredDocs.length === 0 ? (
           <div className="empty-state">
             <span className="empty-icon">📂</span>
             <p>Chưa có tài liệu nào khả dụng cho bạn.</p>
-            <button className="btn btn-primary" onClick={handleNewDocument}>
+            <button className="btn btn-primary" onClick={() => setShowGallery(true)}>
                Tạo ngay tài liệu đầu tiên
             </button>
           </div>
         ) : (
           <div className="doc-cards">
-            {documents.map(doc => {
+            {filteredDocs.map(doc => {
               const isOwner = doc.owner === username;
               return (
                 <div key={doc._id} className="doc-card">
@@ -121,7 +158,7 @@ const DocumentList = ({ onSelectDocument }) => {
                         Chủ: <strong>{isOwner ? 'Tôi' : doc.owner}</strong>
                       </span>
                       <small className="meta-time">
-                        Cập nhật: {new Date(doc.updatedAt).toLocaleDateString()}
+                        Cập nhật: {new Date(doc.updatedAt).toLocaleDateString('vi-VN')}
                       </small>
                     </div>
                   </div>
@@ -141,6 +178,14 @@ const DocumentList = ({ onSelectDocument }) => {
           </div>
         )}
       </div>
+
+      {/* Template Gallery Modal */}
+      {showGallery && (
+        <TemplateGallery
+          onSelect={handleTemplateSelect}
+          onClose={() => setShowGallery(false)}
+        />
+      )}
     </div>
   );
 };

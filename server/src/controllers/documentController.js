@@ -1,4 +1,5 @@
 import Document from '../models/Document.js';
+import Snapshot from '../models/Snapshot.js';
 import mongoose from 'mongoose';
 
 // Helper tính vai trò của người dùng đối với tài liệu
@@ -263,3 +264,98 @@ export const getDocumentHistory = async (req, res) => {
     }
 };
 
+// ── Snapshot / Versioning ────────────────────────────────────────────────────
+
+export const getDocumentSnapshots = async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(404).json({ message: 'Document not found' });
+        }
+        const document = await Document.findById(req.params.id);
+        if (!document) return res.status(404).json({ message: 'Document not found' });
+
+        const username = req.headers['x-username'] || 'Unknown';
+        const role = getRole(document, username);
+        if (!role) return res.status(403).json({ message: 'Bạn không có quyền truy cập tài liệu này.' });
+
+        const snapshots = await Snapshot.find({ documentId: req.params.id })
+            .sort({ createdAt: -1 })
+            .select('_id title revision savedBy label createdAt')
+            .limit(50);
+
+        res.json({ snapshots });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const getSnapshotContent = async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id) || !mongoose.Types.ObjectId.isValid(req.params.snapshotId)) {
+            return res.status(404).json({ message: 'Not found' });
+        }
+        const document = await Document.findById(req.params.id);
+        if (!document) return res.status(404).json({ message: 'Document not found' });
+
+        const username = req.headers['x-username'] || 'Unknown';
+        const role = getRole(document, username);
+        if (!role) return res.status(403).json({ message: 'Bạn không có quyền truy cập tài liệu này.' });
+
+        const snapshot = await Snapshot.findOne({ _id: req.params.snapshotId, documentId: req.params.id });
+        if (!snapshot) return res.status(404).json({ message: 'Snapshot not found' });
+
+        res.json(snapshot);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const restoreSnapshot = async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id) || !mongoose.Types.ObjectId.isValid(req.params.snapshotId)) {
+            return res.status(404).json({ message: 'Not found' });
+        }
+        const document = await Document.findById(req.params.id);
+        if (!document) return res.status(404).json({ message: 'Document not found' });
+
+        const username = req.headers['x-username'] || 'Unknown';
+        const role = getRole(document, username);
+        if (role !== 'owner' && role !== 'editor') {
+            return res.status(403).json({ message: 'Chỉ chủ sở hữu hoặc người chỉnh sửa mới có thể khôi phục phiên bản.' });
+        }
+
+        const snapshot = await Snapshot.findOne({ _id: req.params.snapshotId, documentId: req.params.id });
+        if (!snapshot) return res.status(404).json({ message: 'Snapshot not found' });
+
+        // Lưu trạng thái hiện tại làm backup snapshot trước khi ghi đè
+        await Snapshot.create({
+            documentId: document._id,
+            title: document.title,
+            content: document.content,
+            revision: document.revision,
+            savedBy: username,
+            label: `Tự động lưu trước khi khôi phục Rev.${snapshot.revision}`,
+        });
+
+        // Ghi nội dung của snapshot vào tài liệu hiện tại và tăng revision
+        const newRevision = document.revision + 1;
+        document.content = snapshot.content;
+        document.revision = newRevision;
+        await document.save();
+
+        // Phát sóng qua socket để tất cả client trong phòng tải lại nội dung
+        const io = req.app.get('io');
+        if (io) {
+            io.to(req.params.id).emit('document-restored', {
+                content: snapshot.content,
+                revision: newRevision,
+                restoredBy: username,
+                snapshotLabel: snapshot.label || `Rev.${snapshot.revision}`,
+            });
+        }
+
+        res.json({ message: 'Khôi phục thành công', revision: newRevision, content: snapshot.content });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};

@@ -58,7 +58,11 @@ const diff = (oldStr, newStr) => {
 };
 
 const useOperationalDocument = (documentId, initialTitle, initialContent, initialRevision, initialRole, socket) => {
-    const [content, setContent] = useState(initialContent);
+    // Load local unsaved changes from cache if present (Offline resilience)
+    const unsavedOffline = localStorage.getItem(`doc_unsaved_content_${documentId}`);
+    const initialContentToUse = unsavedOffline || initialContent;
+
+    const [content, setContent] = useState(initialContentToUse);
     const [title, setTitle] = useState(initialTitle);
     const [revision, setRevision] = useState(initialRevision);
     const [role, setRole] = useState(initialRole);
@@ -68,7 +72,7 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
     const clientId = useRef(uuidv4());
 
     // OT state refs (Uncontrolled Single-In-Flight architecture)
-    const contentRef = useRef(initialContent);
+    const contentRef = useRef(initialContentToUse);
     const revisionRef = useRef(initialRevision);
     const lastAckContentRef = useRef(initialContent);
     const inFlightRef = useRef(false);
@@ -198,6 +202,9 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
                     lastAckContentRef.current = serverContent;
                     updateRevision(serverRevision);
 
+                    // Update localStorage with merged unsaved state
+                    localStorage.setItem(`doc_unsaved_content_${documentId}`, mergedContent);
+
                     // Submit transformed offline edits under new base revision
                     inFlightRef.current = true;
                     inFlightOpRef.current = transformedOfflineOp;
@@ -248,6 +255,7 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
                     inFlightRef.current = false;
                     inFlightOpRef.current = null;
                     setIsSaving(false);
+                    localStorage.removeItem(`doc_unsaved_content_${documentId}`);
                 }
             } else {
                 // Normal initial load or simple sync
@@ -257,6 +265,7 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
                 inFlightRef.current = false;
                 inFlightOpRef.current = null;
                 setIsSaving(false);
+                localStorage.removeItem(`doc_unsaved_content_${documentId}`);
             }
 
             setTitle(doc.title);
@@ -273,6 +282,13 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
 
             // Send next queued edit if any
             sendNextOpIfPending();
+
+            // Clear offline cache if fully synchronized
+            if (contentRef.current === lastAckContentRef.current) {
+                localStorage.removeItem(`doc_unsaved_content_${documentId}`);
+            } else {
+                localStorage.setItem(`doc_unsaved_content_${documentId}`, contentRef.current);
+            }
         };
 
         const onDocumentOperation = ({ op, appliedRevision, clientId: remoteClientId }) => {
@@ -310,6 +326,22 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
             setRole(newRole);
         };
 
+        // Khi tài liệu được khôi phục bởi bất kỳ client nào,
+        // force-sync nội dung mới về tất cả client đang mở
+        const onDocumentRestored = ({ content: restoredContent, revision: restoredRevision }) => {
+            updateContent(restoredContent);
+            lastAckContentRef.current = restoredContent;
+            updateRevision(restoredRevision);
+            inFlightRef.current = false;
+            inFlightOpRef.current = null;
+            // Clear local storage unsaved cache
+            localStorage.removeItem(`doc_unsaved_content_${documentId}`);
+            // Xoá undo/redo stack vì nội dung đã thay đổi hoàn toàn
+            undoStackRef.current = [];
+            redoStackRef.current = [];
+            setIsSaving(false);
+        };
+
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
         socket.on('document-state', onDocumentState);
@@ -317,6 +349,7 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
         socket.on('document-operation', onDocumentOperation);
         socket.on('operation-error', onOperationError);
         socket.on('role-update', onRoleUpdate);
+        socket.on('document-restored', onDocumentRestored);
 
         // Set initial connection status
         setConnected(socket.connected);
@@ -329,6 +362,7 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
             socket.off('document-operation', onDocumentOperation);
             socket.off('operation-error', onOperationError);
             socket.off('role-update', onRoleUpdate);
+            socket.off('document-restored', onDocumentRestored);
         };
     }, [socket, documentId, sendNextOpIfPending]);
 
@@ -340,11 +374,14 @@ const useOperationalDocument = (documentId, initialTitle, initialContent, initia
 
         updateContent(newContent);
 
+        // Save to local storage offline cache
+        localStorage.setItem(`doc_unsaved_content_${documentId}`, newContent);
+
         // Trigger sync loop immediately if not waiting for an ACK
         if (!inFlightRef.current) {
             sendNextOpIfPending();
         }
-    }, [role, sendNextOpIfPending]);
+    }, [role, sendNextOpIfPending, documentId]);
 
     // Collaborative undo handler
     const undo = useCallback(() => {
