@@ -1,17 +1,162 @@
-# Hướng dẫn chạy và Báo cáo Đồ án: Trình soạn thảo văn bản cộng tác thời gian thực
+# Hệ Thống Soạn Thảo Văn Bản Cộng Tác (Collaborative Document Editing System)
 
-Dự án này là một nền tảng soạn thảo văn bản cộng tác thời gian thực (Collaborative Rich Text Editor) theo mô hình Client-Server. Hệ thống cho phép nhiều người dùng cùng biên tập một tài liệu đồng thời với cơ chế tự động đồng bộ nhất quán và giải quyết xung đột bằng thuật toán **Operational Transformation (OT)**.
+Một playground full-stack để xây dựng một trình soạn thảo văn bản cộng tác, giữ nhiều client đồng bộ gần như theo thời gian thực. Dự án sử dụng frontend React/Vite kèm API Express + Socket.IO với MongoDB làm lưu trữ. Logic Operational Transform (OT) chạy cả trên client và server giúp các chỉnh sửa nhất quán ngay cả khi nhiều người dùng gõ cùng lúc.
+
+## 👥 Thành Viên Thực Hiện
+
+* **Bùi Xuân Trường** - B22DCCN878 
+
+
+* **Hoàng Đinh Phong** - B22DCCN614 
+
+
+* **Nguyễn Duy Hải Đăng** - B22DCCN208 
+
+
+* **Giảng viên hướng dẫn:** Kim Ngọc Bách 
+
+
+
+*Hà Nội - 2026* 
+
+## 🚀 Tính Năng Chính
+
+### 1. Yêu Cầu Chức Năng Cơ Bản
+
+* **Tạo và quản lý tài liệu:** Thêm, xem, sửa, xóa tài liệu; hiển thị thông tin tác giả, ngày khởi tạo và chỉnh sửa.
+
+
+* **Chỉnh sửa cộng tác thời gian thực:** Độ trễ cập nhật dưới 500ms, hỗ trợ các thao tác ký tự cơ bản và tính năng tự động lưu (Autosave).
+
+
+* **Đồng bộ & Giải quyết xung đột:** Sử dụng thuật toán **Operational Transform (OT)** kết hợp số thứ tự (`sequence number`) để đảm bảo tính nhất quán dữ liệu tối hậu trên mọi client.
+
+
+* **Quản lý phiên làm việc:** Hiển thị danh sách người dùng đang hoạt động, vị trí con trỏ (màu sắc riêng biệt), vùng chọn (selection) và trạng thái tham gia/rời phòng.
+
+
+* **Lưu trữ bền vững:** Toàn bộ dữ liệu cấu trúc rõ ràng được lưu trữ an toàn trên đám mây MongoDB Atlas.
+
+
+
+### 2. Chức Năng Nâng Cao
+
+* Lịch sử chỉnh sửa và quản lý phiên bản (Versioning).
+
+
+* Cơ chế Hoàn tác/Làm lại (Undo/Redo) trong môi trường phân tán.
+
+
+* Hỗ trợ chỉnh sửa ngoại tuyến (Offline Editing) và tự động đồng bộ lại khi có mạng.
+
+
+* Phân quyền chi tiết người dùng (`Owner`, `Editor`, `Viewer`).
+
 
 ---
 
-## I. HƯỚNG DẪN CHẠY DỰ ÁN (GETTING STARTED)
+## 🏗️ Kiến Trúc Hệ Thống
 
-### 1. Yêu cầu hệ thống
-- **Node.js** (phiên bản 16 trở lên)
-- **MongoDB** (máy chủ chạy cục bộ hoặc tài khoản MongoDB Atlas trên đám mây)
+Hệ thống được tổ chức theo **kiến trúc phân cấp (kiến trúc dọc)** dưới dạng mô hình cây giúp tối ưu luồng dữ liệu:
 
-### 2. Cài đặt các gói phụ thuộc (Dependencies)
-Dự án được chia tách rõ ràng thành hai phần: `server` (Backend) và `Client` (Frontend).
+1. **Gốc (Database/Model):** Lưu trữ trạng thái bền vững (Persisted State).
+
+
+2. **Thân/Nhánh (SocketServer):** Tách trạng thái động theo từng `Room ID`, đảm bảo các thao tác của tài liệu này không bị gửi nhầm sang tài liệu khác.
+
+
+3. **Lá (Client Sockets):** Nhận dữ liệu hạ lưu đã được lọc sạch từ phòng trực thuộc.
+
+### Luồng xử lý thao tác (Operation Pipeline)
+
+* **Client Upstream:** Khởi tạo thao tác -> Diff nội dung -> Đóng gói thành `Operation` kèm `Base Revision` -> Đánh dấu *In-flight* và gửi lên server.
+
+
+* **Server Ingestion:** Tiếp nhận -> Kiểm tra quyền (Role) -> Xác thực gói tin -> Phát hiện xung đột bằng cách so sánh số hiệu phiên bản hệ thống và client.
+
+
+* **Server Transformation & Persistence:** Chạy thuật toán OT giải quyết xung đột -> Áp dụng thay đổi vào văn bản gốc -> Tăng `Global Revision` -> Ghi log dữ liệu và lưu vào DB.
+
+
+* **Downstream Broadcast:** Gửi tín hiệu xác nhận (*ACK*) cho client gửi để giải phóng hàng đợi; đồng thời *Broadcast* thao tác đã qua biến đổi tới các client khác trong phòng để cập nhật giao diện.
+
+
+
+---
+
+## Công Nghệ
+
+| Lớp      | Công cụ                               |
+| -------- | ------------------------------------- |
+| Frontend | React 19, Vite, Socket.IO client      |
+| Backend  | Node.js, Express, Socket.IO, Mongoose |
+| Database | MongoDB / MongoDB Atlas               |
+
+---
+
+## 📡 Giao Thức Trao Đổi Dữ Liệu
+
+Hệ thống kết hợp linh hoạt hai phương thức giao tiếp mạng:
+
+* **WebSocket (Socket.IO):** Phục vụ các tác vụ thời gian thực qua cơ chế Full-duplex (Sự kiện: `join-document`, `submit-operation`, `cursor-move`,...). Có cơ chế tự động hạ cấp xuống HTTP Long-Polling nếu mạng lỗi.
+
+
+* **HTTP (REST API):** Chạy trên Express Framework, phục vụ các tác vụ quản trị tài liệu CRUD tuần tự truyền thống.
+
+
+
+---
+
+## 🧪 Kiểm Thử Và Đánh Giá
+
+### Các trường hợp thử nghiệm (Test Cases) thành công
+
+* Kết nối, tham gia phòng và tải trạng thái ban đầu của tài liệu (`document-state`).
+
+
+* Đồng bộ thay đổi thời gian thực cơ bản giữa các tab trình duyệt.
+
+
+* Xử lý xung đột bằng OT thành công khi nhiều client cùng chèn/xóa tại một vị trí.
+
+
+* Quản lý xếp hàng thao tác bằng cơ chế *In-flight* và *Operation ACK*.
+
+
+* Đồng bộ và xóa con trỏ/vùng chọn động của người dùng khác.
+
+
+* Ngắt kết nối, kết nối lại và tái đồng bộ dữ liệu (`request-resync`).
+
+
+* Chặn các gói tin lỗi, không hợp lệ hoặc sai quyền (`Viewer` cố tình chỉnh sửa).
+
+
+
+### 📊 Đánh giá kết quả thực nghiệm
+
+#### Tiêu chí ĐẠT
+
+* Nội dung văn bản đồng bộ chính xác tuyệt đối giữa các client khi gõ ở tốc độ thông thường (dưới 40 từ/phút).
+
+
+* Không xảy ra hiện tượng xung đột hiển thị; số hiệu phiên bản (`Revision`) tăng tuần tự ổn định.
+
+
+* Cơ chế đồng bộ con trỏ và resync khi mất kết nối hoạt động đúng thiết kế.
+
+
+
+#### Hạn chế tồn tại (Tiêu chí CHƯA ĐẠT)
+
+* Khi người dùng thực hiện thao tác xóa hoặc gõ quá nhanh (tốc độ vượt ngưỡng ~40 từ/phút), hệ thống đôi khi xuất hiện hiện tượng bị sót chữ.
+
+
+* Quá trình gõ tiếng Việt (sử dụng Unikey/Telex) thỉnh thoảng gặp lỗi lặp từ/ký tự (`duplicate`) do xung đột cơ chế bắt sự kiện phím.
+
+## Bắt Đầu
+
+### 1. Clone repository
 
 Mở terminal và thực hiện lệnh cài đặt:
 ```bash
@@ -24,12 +169,12 @@ cd ../Client
 npm install
 ```
 
-### 3. Cấu hình biến môi trường (Environment Variables)
-Tạo tệp cấu hình môi trường `.env` trong cả hai thư mục tương ứng:
+### 2. Cấu hình biến môi trường
 
-- **Cấu hình Server** (`server/.env`):
+- **Server** (`server/.env`)
+
   ```env
-  MONGO_URI=mongodb://localhost:27017/collaborative-editor
+  MONGO_URI=chuoi_ket_noi_mongodb_cua_ban
   PORT=3000
   ```
   *(Thay thế `MONGO_URI` bằng đường dẫn kết nối MongoDB thực tế của bạn).*
@@ -39,15 +184,14 @@ Tạo tệp cấu hình môi trường `.env` trong cả hai thư mục tương 
   VITE_API_URL=http://localhost:3000
   ```
 
-### 4. Khởi chạy ứng dụng
-Chạy đồng thời cả Frontend và Backend bằng cách mở hai terminal riêng biệt:
+_(Các file môi trường được git bỏ qua; sao chép từ `.env.example` nếu có.)_
 
-- **Terminal 1 (Backend Server)**:
-  ```bash
-  cd server
-  npm run dev
-  ```
-  *Nodemon sẽ khởi chạy server tại địa chỉ `http://localhost:3000`.*
+###3Install dependencies
+
+```bash
+# Server
+cd server
+npm install
 
 - **Terminal 2 (Frontend Client)**:
   ```bash
@@ -56,104 +200,80 @@ Chạy đồng thời cả Frontend và Backend bằng cách mở hai terminal r
   ```
   *Vite dev server sẽ chạy ứng dụng Client tại địa chỉ mặc định `http://localhost:5173`. Mở trình duyệt và truy cập liên kết này để sử dụng.*
 
----
+### 4. Chạy ứng dụng
 
-## II. BÁO CÁO ĐỒ ÁN (PROJECT REPORT)
+Mở hai terminal riêng biệt:
 
-### 1. Kiến trúc hệ thống (System Architecture)
-Hệ thống được thiết kế theo mô hình **Client-Server** kết hợp cơ chế truyền thông hai chiều thời gian thực thông qua WebSocket:
+```bash
+# Backend
+cd server
+npm run dev        # hoặc npm start cho môi trường production
 
-- **Client (Frontend)**:
-  - Xây dựng bằng **React** kết hợp **Vite** để đảm bảo tốc độ phản hồi giao diện nhanh chóng.
-  - Sử dụng **Socket.IO client** kết nối liên tục đến Server để trao đổi các thao tác chỉnh sửa (Operations).
-  - Có cơ chế **Offline resilience** (Lưu trữ ngoại tuyến): Khi mất mạng, các chỉnh sửa chưa được xác nhận sẽ tự động lưu tạm vào `localStorage` và đồng bộ lại ngay khi kết nối Internet được phục hồi.
-
-- **Server (Backend)**:
-  - Xây dựng trên nền tảng **Node.js** và **Express**.
-  - **Socket.IO server** quản lý danh sách kết nối WebSocket và tổ chức các Client biên tập chung vào các phòng (Rooms) phân biệt theo mã tài liệu (`documentId`).
-  - **OT Engine** nằm ở server có nhiệm vụ thu nhận các thao tác chỉnh sửa từ Client, đối chiếu phiên bản, thực hiện biến đổi hoạt động (Transformation) để giải quyết xung đột trước khi lưu xuống Database và gửi truyền phát (broadcast).
-
-- **Database (Cơ sở dữ liệu)**:
-  - **MongoDB** và **Mongoose** được dùng để lưu trữ thông tin tài liệu (Tiêu đề, nội dung, phiên bản hiện tại).
-  - Bảng ghi lịch sử hoạt động (`opsLog` nằm trong document schema) lưu lại toàn bộ các thao tác đã áp dụng thành công theo trình tự thời gian và chỉ số phiên bản (`appliedRevision`). Điều này giúp server tính toán và chuyển đổi các operation đến muộn.
-  - Bảng ghi `snapshots` lưu trữ các điểm khôi phục của tài liệu cứ sau mỗi khoảng thời gian cấu hình (ví dụ: 30 giây khi có thay đổi), giúp người dùng xem lại lịch sử phiên bản và khôi phục khi cần thiết.
-
-```
-   ┌────────────────┐                     ┌────────────────┐
-   │    Client 1    │ <─── WebSocket ───> │                │
-   │  (React/Vite)  │                     │  Socket.IO &   │
-   └────────────────┘                     │  Express Server│ <───> MongoDB
-   ┌────────────────┐                     │  (OT Engine)   │
-   │    Client 2    │ <─── WebSocket ───> │                │
-   │  (React/Vite)  │                     └────────────────┘
-   └────────────────┘
+# Frontend
+cd ../Client
+npm run dev        # khởi chạy Vite dev server tại http://localhost:5173
 ```
 
----
+Mở client trong trình duyệt, tạo hoặc chọn một tài liệu và bắt đầu chỉnh sửa. Mở cùng tài liệu trong cửa sổ hoặc trình duyệt khác sẽ demo tính năng cộng tác thời gian thực.
 
-### 2. Mô hình đồng bộ dữ liệu (Data Synchronization Model)
-Dự án áp dụng mô hình **Operational Transformation (OT)** với kiến trúc **Single-In-Flight** để đồng bộ dữ liệu văn bản dạng ký tự giữa các client mà không làm gián đoạn trải nghiệm gõ phím của người dùng.
+## Cấu trúc dự án
 
-#### Cách thức hoạt động của mô hình:
-1. **Trạng thái cục bộ (Local State)**:
-   - Mỗi Client giữ một bản sao của tài liệu cùng chỉ số phiên bản đã được máy chủ xác nhận (`revision`).
-   - Khi người dùng gõ phím hoặc xóa chữ, hệ thống ngay lập tức tạo ra một thao tác (`insert` hoặc `delete`) và áp dụng lên màn hình soạn thảo của chính họ mà không cần chờ máy chủ phản hồi (Độ trễ phản hồi giao diện bằng 0).
+```
+Client/                 Frontend React (Vite)
+  src/
+    App.jsx
+    main.jsx
+    index.css
+    api/                Helper REST + socket cho client
+    components/         Giao diện danh sách tài liệu & trình soạn thảo
+    hooks/              Bộ quản lý trạng thái OT tuỳ chỉnh
+    ot/                 Helper Operational Transform
+  package.json
+  vite.config.js
+  README.md
+  eslint.config.js
+server/                 Backend Express + Socket.IO
+  src/
+    app.js
+    server.js
+    config/             Cấu hình DB và môi trường
+    controllers/        Xử lý REST
+    models/             Mongoose schema và model
+    ot/                 Tiện ích Operational Transform phía server
+    routes/             Định tuyến REST
+    sockets/            Kênh tài liệu thời gian thực
+    utils/              Helper lưu trữ
+  test/                 Tests OT
+    ot.test.js
+  package.json
+  README.md
+.gitignore              Quy tắc bỏ qua chung (client + server)
+BACKEND_REQUIREMENTS.md  Tài liệu phụ thuộc backend
+package.json            Root package config
+simple_ws_server.js     Ví dụ WebSocket server
+socket-test.js          Tập tin thử nghiệm socket
+```
 
-2. **Cơ chế gửi Operation tuần tự (Single-In-Flight)**:
-   - Để giữ luồng dữ liệu đơn giản và tránh nghẽn, Client chỉ gửi **duy nhất một** operation lên Server tại một thời điểm (`inFlightOp`).
-   - Mọi chỉnh sửa tiếp theo của người dùng diễn ra trong lúc chờ xác nhận từ Server (chờ tín hiệu ACK) sẽ được tích lũy tạm thời bằng cách tính toán sự khác biệt chuỗi (String Diffing).
-   - Khi nhận được tín hiệu ACK cho operation hiện tại, Client sẽ đóng gói và gửi operation tích lũy kế tiếp.
+## Ghi chú Operational Transform
 
-3. **Chuyển đổi hoạt động xung đột (Operational Transformation)**:
-   - Nếu Client nhận được một remote operation từ người khác khi đang có operation đang chờ xử lý (`inFlightOp`):
-     - Biến đổi remote op đối với local in-flight op: $op'_{remote} = transform(op_{remote}, op_{local\_inflight})$
-     - Áp dụng $op'_{remote}$ vào editor hiện tại.
-     - Biến đổi local in-flight op đối với remote op để chuẩn bị gửi tiếp: $op'_{local\_inflight} = transform(op_{local\_inflight}, op_{remote})$.
+- Client xếp hàng các chỉnh sửa cục bộ cho đến khi server xác nhận với revision được cập nhật.
+- Các thao tác từ xa đến sẽ được biến đổi so với các thao tác cục bộ đang chờ để tránh sai lệch ký tự khi gõ nhanh.
+- Server lưu lại thao tác đã biến đổi, tăng revision và truyền broadcast đến tất cả client đang kết nối.
 
-4. **Xử lý phía Server (Nguồn chân lý duy nhất)**:
-   - Server tiếp nhận operation kèm chỉ số phiên bản làm căn cứ (`baseRevision`).
-   - Nếu `baseRevision` khớp với `revision` hiện tại của tài liệu trên Server, Server sẽ áp dụng trực tiếp, tăng chỉ số revision và phát đi.
-   - Nếu `baseRevision` nhỏ hơn chỉ số hiện tại (xảy ra xung đột đồng thời), Server sẽ lấy các operation đã áp dụng trong `opsLog` từ mốc `baseRevision` đến nay, chạy hàm biến đổi tuần tự (`transformSequence`) để cập nhật lại vị trí (`pos`) của operation mới nhận trước khi áp dụng vào tài liệu.
+## Scripts
 
----
+| Vị trí   | Lệnh              | Mô tả                      |
+| -------- | ----------------- | -------------------------- |
+| `Client` | `npm run dev`     | Vite development server    |
+|          | `npm run build`   | Build production           |
+|          | `npm run preview` | Xem trước bản build        |
+|          | `npm run lint`    | Kiểm tra ESLint            |
+| `server` | `npm run dev`     | Nodemon development server |
+|          | `npm start`       | Khởi động production       |
 
-### 3. Giao thức trao đổi dữ liệu (Data Exchange Protocols)
-Hệ thống kết hợp hài hòa giữa giao thức HTTP (REST API) cho việc tải dữ liệu tĩnh ban đầu và giao thức WebSocket (Socket.IO) cho việc tương tác thời gian thực.
+## Đóng góp
 
-#### 3.1. REST API (HTTP/JSON)
-Dành cho việc quản lý tài liệu và các tác vụ phi thời gian thực:
-- `GET /api/documents` : Lấy danh sách tài liệu hiện có của người dùng.
-- `POST /api/documents` : Tạo một tài liệu mới (có hỗ trợ tạo từ các mẫu - templates có sẵn).
-- `GET /api/documents/:id` : Lấy thông tin chi tiết của một tài liệu bao gồm tiêu đề, nội dung, phiên bản và quyền hạn của người dùng.
-- `PUT /api/documents/:id` : Thay đổi tiêu đề của tài liệu.
-
-#### 3.2. Giao thức WebSocket (Socket.IO Events)
-Dành cho các hoạt động đồng bộ cộng tác thời gian thực:
-- **Tín hiệu gửi đi từ Client (Client -> Server)**:
-  - `join-document`: Gửi yêu cầu tham gia phòng soạn thảo tài liệu `{ documentId, username }`.
-  - `submit-operation`: Gửi gói tin chỉnh sửa `{ documentId, op, clientId, baseRevision }`.
-  - `cursor-move`: Đồng bộ vị trí con trỏ hiện tại `{ documentId, selStart, selEnd }`.
-  - `leave-document`: Thông báo rời khỏi phòng soạn thảo.
-
-- **Tín hiệu phát ra từ Server (Server -> Client)**:
-  - `document-state`: Trả về trạng thái đầy đủ nhất của tài liệu khi người dùng vừa kết nối `{ title, content, revision, role }`.
-  - `operation-ack`: Phản hồi xác nhận thành công thao tác gửi lên `{ appliedRevision, op }`.
-  - `document-operation`: Phát tán thao tác đã xử lý xung đột tới tất cả các client khác `{ op, appliedRevision, clientId }`.
-  - `active-users`: Cập nhật danh sách cộng tác viên đang trực tuyến `{ socketId, username, color, role }`.
-  - `remote-cursor`: Đồng bộ vị trí con trỏ chuột của người dùng khác `{ socketId, username, color, selStart, selEnd }`.
-  - `document-restored`: Thông báo tài liệu đã được khôi phục về phiên bản cũ thành công.
-
----
-
-### 4. Thử nghiệm và Đánh giá (Testing and Evaluation)
-
-#### 4.1. Kịch bản thử nghiệm (Test Scenarios)
-- **Đồng biên tập song song**: Thử nghiệm giả lập 3 người dùng cùng truy cập vào một tài liệu và cùng gõ phím tại các dòng/vị trí ký tự khác nhau. Kết quả: Toàn bộ nội dung văn bản tự động dồn dòng và hiển thị đồng bộ tuyệt đối trên cả 3 trình duyệt.
-- **Kiểm thử gõ phím nhanh đồng thời**: 2 người dùng cố tình chèn chữ vào cùng một vị trí ký tự tại cùng một thời điểm. Thuật toán OT giải quyết xung đột dựa vào ID của client (`clientId`) để phân xử thứ tự chèn trước sau, đảm bảo không bị chồng lấn ký tự.
-- **Kiểm thử chế độ ngoại tuyến (Offline Resilience)**: Tắt mạng Internet của Client A, thực hiện một số chỉnh sửa trên Client A. Trong lúc đó, Client B vẫn trực tuyến và chỉnh sửa bình thường. Khi bật lại mạng của Client A, Client A tự động tính toán sai khác và thực hiện biến đổi (transform) các chỉnh sửa offline với nội dung mới nhất của Client B từ Server gửi về. Kết quả: Hai tài liệu nhập lại làm một một cách thông minh mà không bị đè đè mất dữ liệu.
-- **Hệ thống Undo/Redo cộng tác**: Client A thực hiện Undo hành động gõ chữ của mình khi Client B vừa chèn thêm chữ ở vị trí trước đó. Giao diện Client A tự động tính toán vị trí lùi lại và chỉ hoàn tác đúng những ký tự do Client A đã gõ mà không can thiệp vào chữ của Client B.
-
-#### 4.2. Đánh giá hiệu năng và Kết quả
-- **Băng thông truyền tải**: Rất tối ưu. Thay vì truyền tải toàn bộ tài liệu (Document Content) sau mỗi phím gõ, hệ thống chỉ gửi một gói tin JSON có kích thước siêu nhỏ (chỉ khoảng 50 - 150 bytes) chứa thao tác cụ thể (ví dụ: Chèn chữ 'a' tại vị trí 10).
-- **Trải nghiệm gõ phím**: Mượt mà. Do thao tác được áp dụng cục bộ lên giao diện ngay lập tức trước khi gửi đến Server, người soạn thảo hoàn toàn không có cảm giác bị gián đoạn hay trễ phím (Lag-free typing).
-- **Tính nhất quán dữ liệu**: Khi tất cả người dùng dừng gõ, tài liệu trên tất cả Client hội tụ (convergence) về một phiên bản đồng nhất từ cấu trúc cho đến ký tự và định dạng. Dữ liệu trên cơ sở dữ liệu MongoDB trùng khớp 100% với trạng thái ở client.
+1. Fork repo và tạo branch tính năng.
+2. Commit các thay đổi với thông điệp rõ ràng.
+3. Đảm bảo lint/tests chạy thành công.
+4. Tạo pull request mô tả thay đổi và cách kiểm thử.
