@@ -304,4 +304,4 @@ socket-test.js          Tập tin thử nghiệm socket
 
 ## Báo cáo 
 
-Xem chi tiết tại https://drive.google.com/file/d/1YAZRH3fBr515rMTidf7HyFFKyPYFFpwz/view?usp=sharing
+Xem chi tiết tại https://drive.google.com/file/d/1plZocVG8T3fXaBSfM4mNFXbQ27audkyC/view?usp=sharing hoặc ./Báo cáo HTPT.pdf
