@@ -117,6 +117,160 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
     const lastContentRef = useRef('');
     const { remoteCursors, emitCursor } = useCursorTracking(documentId, editorRef, content);
 
+    const [selectedImage, setSelectedImage] = useState(null);
+    const [imgRect, setImgRect] = useState(null);
+
+    // Track the selected image's bounding rect relative to the editor workspace
+    useEffect(() => {
+        if (!selectedImage) {
+            setImgRect(null);
+            return;
+        }
+
+        const updateRect = () => {
+            const rect = selectedImage.getBoundingClientRect();
+            const workspace = editorRef.current?.closest('.editor-workspace');
+            if (!workspace) return;
+            const workspaceRect = workspace.getBoundingClientRect();
+            const scrollTop = workspace.scrollTop;
+            
+            setImgRect({
+                top: rect.top - workspaceRect.top + scrollTop,
+                left: rect.left - workspaceRect.left,
+                width: rect.width,
+                height: rect.height
+            });
+        };
+
+        updateRect();
+
+        // Listen to windows resize to reposition overlay correctly
+        window.addEventListener('resize', updateRect);
+        return () => window.removeEventListener('resize', updateRect);
+    }, [selectedImage]);
+
+    // Handle image resizing via dragging corners
+    const handleResizeMouseDown = (e, direction) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startWidth = selectedImage.clientWidth;
+        const startHeight = selectedImage.clientHeight;
+        const aspectRatio = startWidth / startHeight;
+
+        const handleMouseMove = (moveEvent) => {
+            const deltaX = moveEvent.clientX - startX;
+            let newWidth = startWidth;
+
+            if (direction === 'bottom-right' || direction === 'top-right') {
+                newWidth = startWidth + deltaX;
+            } else {
+                newWidth = startWidth - deltaX;
+            }
+
+            // Min/max boundaries
+            newWidth = Math.max(50, Math.min(800, newWidth));
+            const newHeight = newWidth / aspectRatio;
+
+            selectedImage.style.width = `${newWidth}px`;
+            selectedImage.style.height = 'auto';
+
+            // Realtime update the border overlay positioning
+            const rect = selectedImage.getBoundingClientRect();
+            const workspace = editorRef.current?.closest('.editor-workspace');
+            if (workspace) {
+                const workspaceRect = workspace.getBoundingClientRect();
+                setImgRect({
+                    top: rect.top - workspaceRect.top + workspace.scrollTop,
+                    left: rect.left - workspaceRect.left,
+                    width: rect.width,
+                    height: rect.height
+                });
+            }
+        };
+
+        const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+
+            const newHTML = editorRef.current.innerHTML;
+            lastContentRef.current = newHTML;
+            handleContentChange(newHTML);
+            emitCursor();
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    };
+
+    // Align both text and images using the same toolbar commands
+    const handleAlign = (command) => {
+        if (isViewer) return;
+        if (selectedImage) {
+            const parent = selectedImage.parentElement;
+            if (parent) {
+                if (command === 'justifyLeft') {
+                    parent.style.textAlign = 'left';
+                    selectedImage.style.display = 'inline-block';
+                    selectedImage.style.margin = '10px 0';
+                } else if (command === 'justifyCenter') {
+                    parent.style.textAlign = 'center';
+                    selectedImage.style.display = 'block';
+                    selectedImage.style.margin = '10px auto';
+                } else if (command === 'justifyRight') {
+                    parent.style.textAlign = 'right';
+                    selectedImage.style.display = 'inline-block';
+                    selectedImage.style.margin = '10px 0';
+                }
+            }
+            const newHTML = editorRef.current.innerHTML;
+            lastContentRef.current = newHTML;
+            handleContentChange(newHTML);
+            emitCursor();
+
+            // Refresh overlay position
+            setTimeout(() => {
+                if (selectedImage) {
+                    const rect = selectedImage.getBoundingClientRect();
+                    const workspace = editorRef.current?.closest('.editor-workspace');
+                    if (workspace) {
+                        const workspaceRect = workspace.getBoundingClientRect();
+                        setImgRect({
+                            top: rect.top - workspaceRect.top + workspace.scrollTop,
+                            left: rect.left - workspaceRect.left,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                    }
+                }
+            }, 50);
+        } else {
+            handleFormat(command);
+        }
+    };
+
+    // Trigger local file picker to directly upload and insert an image
+    const handleInsertImage = () => {
+        if (isViewer) return;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (readerEvent) => {
+                    const base64Url = readerEvent.target.result;
+                    handleFormat('insertImage', base64Url);
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+        input.click();
+    };
+
     const handleTitleChange = (newTitle) => {
         updateDocument(documentId, { title: newTitle });
     };
@@ -242,8 +396,18 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
         }
     };
 
-    // Xử lý click trong vùng soạn thảo (hỗ trợ click mở link)
+    // Xử lý click trong vùng soạn thảo (hỗ trợ click mở link và chọn ảnh)
     const handleEditorClick = (e) => {
+        const img = e.target.closest('img');
+        if (img) {
+            e.preventDefault();
+            setSelectedImage(img);
+            emitCursor();
+            return;
+        } else {
+            setSelectedImage(null);
+        }
+
         const anchor = e.target.closest('a');
         if (anchor) {
             // Nếu là người xem (isViewer) -> Click chuột trái bình thường sẽ mở link
@@ -325,43 +489,43 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
 
             {/* ─── GOOGLE DOCS TOOLBAR ─── */}
             <div className="google-docs-toolbar">
-                                {/* Undo Button */}
-                                <button 
-                                    className="toolbar-btn notranslate"
-                                    translate="no"
-                                    onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        if (canUndo && !isViewer) undo();
-                                    }}
-                                    disabled={!canUndo || isViewer}
-                                    title="Hoàn tác (Ctrl+Z)"
-                                    style={{ opacity: (canUndo && !isViewer) ? 1 : 0.4 }}
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
-                                </button>
+                {/* Undo Button */}
+                <button
+                    className="toolbar-btn notranslate"
+                    translate="no"
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (canUndo && !isViewer) undo();
+                    }}
+                    disabled={!canUndo || isViewer}
+                    title="Hoàn tác (Ctrl+Z)"
+                    style={{ opacity: (canUndo && !isViewer) ? 1 : 0.4 }}
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
+                </button>
 
-                                {/* Redo Button */}
-                                <button 
-                                    className="toolbar-btn notranslate"
-                                    translate="no"
-                                    onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        if (canRedo && !isViewer) redo();
-                                    }}
-                                    disabled={!canRedo || isViewer}
-                                    title="Làm lại (Ctrl+Y)"
-                                    style={{ opacity: (canRedo && !isViewer) ? 1 : 0.4 }}
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" /></svg>
-                                </button>
+                {/* Redo Button */}
+                <button
+                    className="toolbar-btn notranslate"
+                    translate="no"
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (canRedo && !isViewer) redo();
+                    }}
+                    disabled={!canRedo || isViewer}
+                    title="Làm lại (Ctrl+Y)"
+                    style={{ opacity: (canRedo && !isViewer) ? 1 : 0.4 }}
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" /></svg>
+                </button>
 
-                                <div className="toolbar-separator" />
+                <div className="toolbar-separator" />
 
-                                <button className="toolbar-btn" onClick={() => window.print()} title="In tài liệu (Ctrl+P)">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>
-                                </button>
-                                <div className="toolbar-separator" />
-                
+                <button className="toolbar-btn" onClick={() => window.print()} title="In tài liệu (Ctrl+P)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><path d="M6 14h12v8H6z" /></svg>
+                </button>
+                <div className="toolbar-separator" />
+
 
 
                 {/* History Toggle */}
@@ -370,7 +534,7 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     onClick={() => setShowHistory(v => !v)}
                     title="Lịch sử chỉnh sửa"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/><path d="M12 2a10 10 0 0 0-10 10"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /><path d="M12 2a10 10 0 0 0-10 10" /></svg>
                 </button>
                 <div className="toolbar-separator" />
 
@@ -438,7 +602,7 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     disabled={isViewer}
                     title="In đậm (Ctrl+B)"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" /><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" /></svg>
                 </button>
                 <button
                     className="toolbar-btn italic-btn notranslate"
@@ -447,7 +611,7 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     disabled={isViewer}
                     title="In nghiêng (Ctrl+I)"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4" /><line x1="14" y1="20" x2="5" y2="20" /><line x1="15" y1="4" x2="9" y2="20" /></svg>
                 </button>
                 <button
                     className="toolbar-btn underline-btn notranslate"
@@ -456,7 +620,7 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     disabled={isViewer}
                     title="Gạch chân (Ctrl+U)"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3" /><line x1="4" y1="21" x2="20" y2="21" /></svg>
                 </button>
                 <button
                     className="toolbar-btn strikethrough-btn notranslate"
@@ -465,14 +629,14 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     disabled={isViewer}
                     title="Gạch ngang"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4H9a4 4 0 0 0-4 4 4 4 0 0 0 4 4h6a4 4 0 0 1 4 4 4 4 0 0 1-4 4H7"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4H9a4 4 0 0 0-4 4 4 4 0 0 0 4 4h6a4 4 0 0 1 4 4 4 4 0 0 1-4 4H7" /><line x1="4" y1="12" x2="20" y2="12" /></svg>
                 </button>
 
                 <div className="toolbar-separator" />
 
                 {/* Màu chữ (Color Picker) */}
-                <label 
-                    className="toolbar-btn text-color-btn notranslate" 
+                <label
+                    className="toolbar-btn text-color-btn notranslate"
                     translate="no"
                     title="Màu chữ"
                     style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
@@ -480,43 +644,43 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 20h16" strokeWidth="3" stroke="currentColor" />
-                        <path d="M7 16l5-12 5 12" strokeWidth="2"/>
-                        <path d="M9 12h6" strokeWidth="2"/>
+                        <path d="M7 16l5-12 5 12" strokeWidth="2" />
+                        <path d="M9 12h6" strokeWidth="2" />
                     </svg>
-                    <input 
-                        type="color" 
+                    <input
+                        type="color"
                         onChange={(e) => handleFormat('foreColor', e.target.value)}
                         disabled={isViewer}
-                        style={{ width: 0, height: 0, opacity: 0, position: 'absolute', pointerEvents: 'none' }} 
+                        style={{ width: 0, height: 0, opacity: 0, position: 'absolute', pointerEvents: 'none' }}
                     />
                 </label>
 
                 <div className="toolbar-separator" />
 
                 {/* Căn lề */}
-                <button 
-                    className="toolbar-btn" 
-                    onMouseDown={(e) => { e.preventDefault(); handleFormat('justifyLeft'); }}
-                    disabled={isViewer} 
+                <button
+                    className="toolbar-btn"
+                    onMouseDown={(e) => { e.preventDefault(); handleAlign('justifyLeft'); }}
+                    disabled={isViewer}
                     title="Căn lề trái"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="17" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="17" y1="18" x2="3" y2="18" /></svg>
                 </button>
-                <button 
-                    className="toolbar-btn" 
-                    onMouseDown={(e) => { e.preventDefault(); handleFormat('justifyCenter'); }}
-                    disabled={isViewer} 
+                <button
+                    className="toolbar-btn"
+                    onMouseDown={(e) => { e.preventDefault(); handleAlign('justifyCenter'); }}
+                    disabled={isViewer}
                     title="Căn giữa"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="10" x2="6" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="18" y1="18" x2="6" y2="18"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="10" x2="6" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="18" y1="18" x2="6" y2="18" /></svg>
                 </button>
-                <button 
-                    className="toolbar-btn" 
-                    onMouseDown={(e) => { e.preventDefault(); handleFormat('justifyRight'); }}
-                    disabled={isViewer} 
+                <button
+                    className="toolbar-btn"
+                    onMouseDown={(e) => { e.preventDefault(); handleAlign('justifyRight'); }}
+                    disabled={isViewer}
                     title="Căn lề phải"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="10" x2="7" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="7" y2="18"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="10" x2="7" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="7" y2="18" /></svg>
                 </button>
 
                 <div className="toolbar-separator" />
@@ -529,8 +693,8 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     onMouseDown={(e) => e.preventDefault()}
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 20h9"/>
-                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                     </svg>
                     <input
                         type="color"
@@ -549,8 +713,22 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     title="Chèn liên kết (URL)"
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    </svg>
+                </button>
+
+                {/* Insert Image */}
+                <button
+                    className="toolbar-btn notranslate"
+                    onMouseDown={(e) => { e.preventDefault(); handleInsertImage(); }}
+                    disabled={isViewer}
+                    title="Chèn ảnh (Tải lên từ thiết bị)"
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
                     </svg>
                 </button>
 
@@ -566,7 +744,59 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
 
 
                 {/* Giữa: Vùng soạn thảo trang giấy A4 */}
-                <div className="editor-workspace">
+                <div className="editor-workspace" style={{ position: 'relative' }}>
+                    {imgRect && (
+                        <div
+                            className="image-resize-overlay notranslate"
+                            translate="no"
+                            style={{
+                                position: 'absolute',
+                                top: `${imgRect.top}px`,
+                                left: `${imgRect.left}px`,
+                                width: `${imgRect.width}px`,
+                                height: `${imgRect.height}px`,
+                                border: '2px solid #1a73e8',
+                                pointerEvents: 'none',
+                                zIndex: 1000
+                            }}
+                        >
+                            {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(dir => {
+                                const handleStyle = {
+                                    position: 'absolute',
+                                    width: '8px',
+                                    height: '8px',
+                                    backgroundColor: '#1a73e8',
+                                    border: '1px solid #fff',
+                                    borderRadius: '50%',
+                                    pointerEvents: 'auto',
+                                };
+                                if (dir === 'top-left') {
+                                    handleStyle.top = '-5px';
+                                    handleStyle.left = '-5px';
+                                    handleStyle.cursor = 'nwse-resize';
+                                } else if (dir === 'top-right') {
+                                    handleStyle.top = '-5px';
+                                    handleStyle.right = '-5px';
+                                    handleStyle.cursor = 'nesw-resize';
+                                } else if (dir === 'bottom-left') {
+                                    handleStyle.bottom = '-5px';
+                                    handleStyle.left = '-5px';
+                                    handleStyle.cursor = 'nesw-resize';
+                                } else if (dir === 'bottom-right') {
+                                    handleStyle.bottom = '-5px';
+                                    handleStyle.right = '-5px';
+                                    handleStyle.cursor = 'nwse-resize';
+                                }
+                                return (
+                                    <div
+                                        key={dir}
+                                        style={handleStyle}
+                                        onMouseDown={(e) => handleResizeMouseDown(e, dir)}
+                                    />
+                                );
+                            })}
+                        </div>
+                    )}
                     <div className="paper-page">
                         <div className="textarea-wrapper">
                             <div
@@ -631,4 +861,4 @@ export default DocumentEditor;
 
 
 
-
+

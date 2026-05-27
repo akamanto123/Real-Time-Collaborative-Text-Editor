@@ -94,7 +94,7 @@ const ShareModal = ({ documentData, onClose, onUpdate }) => {
                         <form onSubmit={handleAddUser} className="add-user-form">
                             <input
                                 type="text"
-                                placeholder="Nhập tên người dùng (Username)..."
+                                placeholder="Nhập tên hoặc email (Username/Email)..."
                                 value={newUsername}
                                 onChange={e => setNewUsername(e.target.value)}
                                 className="add-username-input"
