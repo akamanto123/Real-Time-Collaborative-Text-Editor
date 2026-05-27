@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { loadDocument, appendOperation } from '../utils/documentStore.js';
 import { applyOp, transformSequence, validateOp } from '../ot/operations.js';
 import Document from '../models/Document.js';
+import Snapshot from '../models/Snapshot.js';
 import { getRole } from '../controllers/documentController.js';
 
 const registerDocumentSocket = (io) => {
@@ -11,6 +12,26 @@ const registerDocumentSocket = (io) => {
     '#9b59b6', '#1abc9c', '#e67e22', '#e91e63'
   ];
   let colorIndex = 0;
+
+  // Bộ nhớ đệm thời gian snapshot gần nhất cho mỗi document
+  // key: documentId, value: { lastSnapshotTime, pending: boolean }
+  const snapshotTimers = {};
+  const SNAPSHOT_INTERVAL_MS = 30 * 1000; // 30 giây
+
+  const maybeSaveSnapshot = async (documentId, content, revision, username, title) => {
+    const now = Date.now();
+    const entry = snapshotTimers[documentId];
+
+    if (!entry || now - entry.lastSnapshotTime >= SNAPSHOT_INTERVAL_MS) {
+      snapshotTimers[documentId] = { lastSnapshotTime: now };
+      try {
+        await Snapshot.create({ documentId, title, content, revision, savedBy: username });
+        console.log(`[Snapshot] Saved for doc ${documentId} at rev ${revision} by ${username}`);
+      } catch (err) {
+        console.error('[Snapshot] Error saving snapshot:', err.message);
+      }
+    }
+  };
 
   const getActiveUsers = async (documentId) => {
     const sockets = await io.in(documentId).fetchSockets();
@@ -134,6 +155,9 @@ const registerDocumentSocket = (io) => {
 
       socket.emit('operation-ack', { appliedRevision: newRevision, op: transformedOp });
       socket.to(documentId).emit('document-operation', { op: transformedOp, appliedRevision: newRevision, clientId });
+
+      // Tự động tạo snapshot sau khi áp dụng thành công (throttled)
+      maybeSaveSnapshot(documentId, content, newRevision, socketUser.username, doc.title);
     });
 
     socket.on('request-resync', async ({ documentId }) => {
@@ -144,20 +168,6 @@ const registerDocumentSocket = (io) => {
         socket.emit('document-state', { title: doc.title, content: doc.content, revision: doc.revision, ops: [], role });
       }
     });
-
-    socket.on('send-chat-message', ({ documentId, text }) => {
-      const info = socket.data;
-      if (!info || info.documentId !== documentId || !text.trim()) return;
-
-      io.to(documentId).emit('chat-message', {
-        socketId: socket.id,
-        username: info.username,
-        color: info.color,
-        text,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      });
-    });
-
     // Cursor position tracking
     socket.on('cursor-move', ({ documentId, selStart, selEnd }) => {
       const info = socket.data;

@@ -6,8 +6,7 @@ import ActiveUsers from './ActiveUsers';
 import HistoryPanel from './HistoryPanel';
 import { useCursorTracking, CursorOverlay, getSelectionCharacterOffsetsWithin, setSelectionCharacterOffsetsWithin } from './CursorTracker';
 import ShareModal from './ShareModal';
-import OutlineSidebar from './OutlineSidebar';
-import ChatSidebar from './ChatSidebar';
+import { toast } from './ToastNotification';
 
 // Tạo username ngẫu nhiên cho mỗi tab riêng (dùng sessionStorage)
 const getSessionUsername = () => {
@@ -38,8 +37,29 @@ const DocumentEditor = ({ documentId, onBack }) => {
         };
 
         // Lắng nghe danh sách người dùng online
+        const prevUsersRef = { current: [] };
         socket.on('active-users', (users) => {
+            const prev = prevUsersRef.current;
+            const me = username.current;
+            // Phát hiện user mới vào
+            users.forEach(u => {
+                if (u.username !== me && !prev.find(p => p.clientId === u.clientId)) {
+                    toast.info(`👤 ${u.username} đã tham gia`);
+                }
+            });
+            // Phát hiện user rời đi
+            prev.forEach(p => {
+                if (p.username !== me && !users.find(u => u.clientId === p.clientId)) {
+                    toast.info(`👋 ${p.username} đã rời khỏi`);
+                }
+            });
+            prevUsersRef.current = users;
             setActiveUsers(users);
+        });
+
+        // Lắng nghe khi tài liệu được khôi phục bởi người dùng khác
+        socket.on('document-restored', ({ restoredBy, snapshotLabel }) => {
+            toast.warn(`🔄 ${restoredBy} đã khôi phục: ${snapshotLabel}`);
         });
 
         // Nếu socket đã connected → join ngay
@@ -91,8 +111,6 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
         socket
     );
     const [showHistory, setShowHistory] = useState(false);
-    const [showOutline, setShowOutline] = useState(true);
-    const [showChat, setShowChat] = useState(false);
     const [showShareModal, setShowShareModal] = useState(false);
     const [docData, setDocData] = useState(initialData);
     const editorRef = useRef(null);
@@ -191,6 +209,62 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
         emitCursor();
     };
 
+    // Chọn màu nền văn bản (Highlight)
+    const handleHighlight = (color) => {
+        if (isViewer) return;
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.focus();
+        document.execCommand('hiliteColor', false, color);
+        const newHTML = editor.innerHTML;
+        lastContentRef.current = newHTML;
+        handleContentChange(newHTML);
+    };
+
+    // Chèn liên kết
+    const handleInsertLink = () => {
+        if (isViewer) return;
+        const url = window.prompt('Nhập địa chỉ URL:', 'https://');
+        if (url && url !== 'https://') {
+            handleFormat('createLink', url);
+            // Mở link trong tab mới – cập nhật thuộc tính target
+            const editor = editorRef.current;
+            if (editor) {
+                editor.querySelectorAll('a[href="' + url + '"]').forEach(a => {
+                    a.setAttribute('target', '_blank');
+                    a.setAttribute('rel', 'noopener noreferrer');
+                    a.setAttribute('title', 'Nhấn Ctrl + Click để mở liên kết');
+                });
+                const newHTML = editor.innerHTML;
+                lastContentRef.current = newHTML;
+                handleContentChange(newHTML);
+            }
+        }
+    };
+
+    // Xử lý click trong vùng soạn thảo (hỗ trợ click mở link)
+    const handleEditorClick = (e) => {
+        const anchor = e.target.closest('a');
+        if (anchor) {
+            // Nếu là người xem (isViewer) -> Click chuột trái bình thường sẽ mở link
+            // Nếu là người chỉnh sửa -> Nhấn Ctrl/Cmd + Click để mở link
+            if (isViewer || e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                const href = anchor.getAttribute('href');
+                if (href) {
+                    const targetUrl = href.match(/^https?:\/\//i) ? href : `https://${href}`;
+                    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                }
+                return;
+            } else {
+                toast.info('💡 Nhấn giữ phím Ctrl (hoặc Cmd) + Click vào link để truy cập liên kết.');
+            }
+        }
+        emitCursor();
+    };
+
+
+
     return (
         <div className="document-editor google-docs-theme">
             {/* ─── GOOGLE DOCS TOP BAR ─── */}
@@ -209,7 +283,7 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                                 className="docs-title-input"
                                 disabled={isViewer}
                             />
-                            <span className="star-icon" title="Thêm vào thư mục gắn sao">⭐</span>
+
                             <div className="autosave-status">
                                 {!connected ? (
                                     <span className="save-status-offline" style={{ color: '#d93025', fontWeight: 'bold' }} title="Mất kết nối. Các chỉnh sửa sẽ được lưu tạm ngoại tuyến và tự động đồng bộ khi kết nối lại.">
@@ -288,37 +362,15 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                                 </button>
                                 <div className="toolbar-separator" />
                 
-                {/* Outline Toggle */}
-                <button
-                    className={`toolbar-btn ${showOutline ? 'active' : ''}`}
-                    onClick={() => setShowOutline(v => !v)}
-                    title="Hiển thị Dàn ý (Outline)"
-                >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                </button>
+
 
                 {/* History Toggle */}
                 <button
                     className={`toolbar-btn ${showHistory ? 'active' : ''}`}
-                    onClick={() => {
-                        setShowHistory(v => !v);
-                        if (!showHistory) setShowChat(false); // Đóng chat nếu mở history
-                    }}
+                    onClick={() => setShowHistory(v => !v)}
                     title="Lịch sử chỉnh sửa"
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/><path d="M12 2a10 10 0 0 0-10 10"/></svg>
-                </button>
-
-                {/* Chat Toggle */}
-                <button
-                    className={`toolbar-btn ${showChat ? 'active' : ''}`}
-                    onClick={() => {
-                        setShowChat(v => !v);
-                        if (!showChat) setShowHistory(false); // Đóng history nếu mở chat
-                    }}
-                    title="Trò chuyện nhóm (Real-time Chat)"
-                >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 </button>
                 <div className="toolbar-separator" />
 
@@ -466,20 +518,52 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="10" x2="7" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="7" y2="18"/></svg>
                 </button>
+
+                <div className="toolbar-separator" />
+
+                {/* Highlight (Màu nền văn bản) */}
+                <label
+                    className="toolbar-btn notranslate"
+                    title="Highlight - màu nền văn bản"
+                    style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                    onMouseDown={(e) => e.preventDefault()}
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 20h9"/>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                    </svg>
+                    <input
+                        type="color"
+                        defaultValue="#FFFF00"
+                        onChange={(e) => handleHighlight(e.target.value)}
+                        disabled={isViewer}
+                        style={{ width: 0, height: 0, opacity: 0, position: 'absolute', pointerEvents: 'none' }}
+                    />
+                </label>
+
+                {/* Insert Link */}
+                <button
+                    className="toolbar-btn notranslate"
+                    onMouseDown={(e) => { e.preventDefault(); handleInsertLink(); }}
+                    disabled={isViewer}
+                    title="Chèn liên kết (URL)"
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                    </svg>
+                </button>
+
+                <div className="toolbar-separator" />
+
+
             </div>
 
             {error && <div className="error-bar">⚠️ {error}</div>}
 
             {/* ─── EDITOR BODY & WORKSPACE ─── */}
             <div className="editor-layout-body">
-                {/* Trái: Outline */}
-                {showOutline && (
-                    <OutlineSidebar
-                        content={content}
-                        textareaRef={editorRef}
-                        onHeadingClick={emitCursor}
-                    />
-                )}
+
 
                 {/* Giữa: Vùng soạn thảo trang giấy A4 */}
                 <div className="editor-workspace">
@@ -491,7 +575,7 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                                 onInput={handleInput}
                                 onKeyUp={emitCursor}
                                 onKeyDown={handleKeyDown}
-                                onClick={emitCursor}
+                                onClick={handleEditorClick}
                                 onMouseUp={emitCursor}
                                 onSelect={emitCursor}
                                 placeholder={isViewer ? "Bạn chỉ có quyền xem tài liệu này..." : "Nhập nội dung văn bản tại đây (Dùng thanh công cụ để định dạng)..."}
@@ -507,19 +591,14 @@ const Editor = ({ initialData, onBack, documentId, activeUsers, currentUsername 
                     </div>
                 </div>
 
-                {/* Phải: Chat Sidebar hoặc History Panel */}
-                {showChat && (
-                    <ChatSidebar
-                        documentId={documentId}
-                        socket={socket}
-                        currentUsername={currentUsername}
-                    />
-                )}
+
 
                 {showHistory && (
                     <HistoryPanel
                         documentId={documentId}
                         onClose={() => setShowHistory(false)}
+                        role={role}
+                        onRestored={() => setShowHistory(false)}
                     />
                 )}
             </div>

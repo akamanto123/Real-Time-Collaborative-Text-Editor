@@ -158,9 +158,15 @@ Hệ thống kết hợp linh hoạt hai phương thức giao tiếp mạng:
 
 ### 1. Clone repository
 
+Mở terminal và thực hiện lệnh cài đặt:
 ```bash
-git clone https://github.com/soumya-1712/Real-Time-Collaborative-Text-Editor.git
-cd Real-Time-Collaborative-Text-Editor
+# Cài đặt dependencies cho Backend Server
+cd server
+npm install
+
+# Cài đặt dependencies cho Frontend Client
+cd ../Client
+npm install
 ```
 
 ### 2. Cấu hình biến môi trường
@@ -171,8 +177,9 @@ cd Real-Time-Collaborative-Text-Editor
   MONGO_URI=chuoi_ket_noi_mongodb_cua_ban
   PORT=3000
   ```
+  *(Thay thế `MONGO_URI` bằng đường dẫn kết nối MongoDB thực tế của bạn).*
 
-- **Client** (`Client/.env`)
+- **Cấu hình Client** (`Client/.env`):
   ```env
   VITE_API_URL=http://localhost:3000
   ```
@@ -186,10 +193,12 @@ _(Các file môi trường được git bỏ qua; sao chép từ `.env.example` 
 cd server
 npm install
 
-# Client
-cd ../Client
-npm install
-```
+- **Terminal 2 (Frontend Client)**:
+  ```bash
+  cd Client
+  npm run dev
+  ```
+  *Vite dev server sẽ chạy ứng dụng Client tại địa chỉ mặc định `http://localhost:5173`. Mở trình duyệt và truy cập liên kết này để sử dụng.*
 
 ### 4. Chạy ứng dụng
 
