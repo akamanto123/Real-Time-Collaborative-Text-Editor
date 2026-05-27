@@ -67,6 +67,8 @@ Hệ thống được tổ chức theo **kiến trúc phân cấp (kiến trúc 
 
 3. **Lá (Client Sockets):** Nhận dữ liệu hạ lưu đã được lọc sạch từ phòng trực thuộc.
 
+![Kiến trúc hệ thống](https://github.com/akamanto123/Real-Time-Collaborative-Text-Editor/blob/c907665aa7d2d408d6e2d83d518ccac3f179d463/Blank%20diagram%20(1).png)
+
 ### Luồng xử lý thao tác (Operation Pipeline)
 
 * **Client Upstream:** Khởi tạo thao tác -> Diff nội dung -> Đóng gói thành `Operation` kèm `Base Revision` -> Đánh dấu *In-flight* và gửi lên server.
@@ -80,6 +82,7 @@ Hệ thống được tổ chức theo **kiến trúc phân cấp (kiến trúc 
 
 * **Downstream Broadcast:** Gửi tín hiệu xác nhận (*ACK*) cho client gửi để giải phóng hàng đợi; đồng thời *Broadcast* thao tác đã qua biến đổi tới các client khác trong phòng để cập nhật giao diện.
 
+![luồng xử lý](https://github.com/akamanto123/Real-Time-Collaborative-Text-Editor/blob/c907665aa7d2d408d6e2d83d518ccac3f179d463/Blank%20diagram%20(2).png)
 
 
 ---
