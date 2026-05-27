@@ -94,6 +94,28 @@ Hệ thống được tổ chức theo **kiến trúc phân cấp (kiến trúc 
 
 ---
 
+# Mô Hình Đồng Bộ Dữ Liệu
+
+Hệ thống sử dụng sự kết hợp giữa **mô hình kênh sự kiện (Event Channel Model)** và **mô hình dữ liệu tập trung (Centralized Data Model)** để hình thành nên các không gian dữ liệu chia sẻ (Shared Data Spaces).
+
+## 🔄 Cơ Chế Giao Tiếp (Event-Driven)
+
+* **Giao tiếp qua Socket.IO:** Client và Server trao đổi dữ liệu hoàn toàn bằng các sự kiện định sẵn như:
+  * `join-document`: Tham gia vào phòng tài liệu.
+  * `submit-operation`: Gửi thao tác chỉnh sửa từ client lên server.
+  * `document-operation`: Server phát tán thao tác chỉnh sửa đến các client khác.
+  * `cursor-move`: Cập nhật vị trí con trỏ chuột thời gian thực.
+* **Vai trò của Socket.IO:** Đóng vai trò là mạng trung gian (**Middleware**) điều phối, phát tán (broadcast) sự kiện tới tất cả các client đã đăng ký (`subscribe`) vào phòng tài liệu đó.
+* **Tách biệt liên kết (Decoupling):** Client và Server không truy xuất trực tiếp vào nhau mà tương tác gián tiếp thông qua **Kênh sự kiện (Event Channel)**.
+
+## 💾 Kiến Trúc Lưu Trữ (Centralized Data)
+
+Về mặt lưu trữ, hệ thống áp dụng **mô hình dữ liệu tập trung** ở phía Backend:
+* **Server là kho dữ liệu chung (Single Source of Truth):** Đóng vai trò trung tâm lưu trữ toàn bộ trạng thái của tài liệu.
+* **Luồng dữ liệu:** Client bắt buộc phải đi qua Server để lấy hoặc ghi lại trạng thái mới nhất của tài liệu, đảm bảo tính nhất quán dữ liệu giữa các phiên làm việc.
+
+---
+
 ## 📡 Giao Thức Trao Đổi Dữ Liệu
 
 Hệ thống kết hợp linh hoạt hai phương thức giao tiếp mạng:
