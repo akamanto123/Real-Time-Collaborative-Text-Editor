@@ -17,7 +17,6 @@ Một playground full-stack để xây dựng một trình soạn thảo văn b�
 
 
 
-*Hà Nội - 2026* 
 
 ## 🚀 Tính Năng Chính
 
@@ -302,3 +301,7 @@ socket-test.js          Tập tin thử nghiệm socket
 2. Commit các thay đổi với thông điệp rõ ràng.
 3. Đảm bảo lint/tests chạy thành công.
 4. Tạo pull request mô tả thay đổi và cách kiểm thử.
+
+## Báo cáo 
+
+Xem chi tiết tại https://drive.google.com/file/d/1YAZRH3fBr515rMTidf7HyFFKyPYFFpwz/view?usp=sharing
